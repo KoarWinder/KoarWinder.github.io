@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mr_Larp — Донат</title>
 <style>
-  :root { --accent: 45, 212, 191; }
+  :root { --accent: 255, 107, 129; }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
@@ -25,11 +25,11 @@
   .spot {
     position: fixed; inset: 0; pointer-events: none;
     background: radial-gradient(520px circle at var(--mx, 50%) var(--my, 50%),
-                rgba(var(--accent), .10), transparent 60%);
+                rgba(var(--accent), .045), transparent 60%);
   }
   .spot::after {   /* второе, тёплое пятно с задержкой — даёт глубину и мягкий шлейф */
     content: ""; position: absolute; inset: 0;
-    background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), rgba(255,170,80,.07), transparent 70%);
+    background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), rgba(255,170,80,.025), transparent 70%);
   }
   body { animation: fadein 1.4s ease both; }
   @keyframes fadein { from { opacity: 0; } }
@@ -78,7 +78,7 @@
   }
   .donate::before {   /* подсветка под курсором внутри кнопки */
     content: ""; position: absolute; inset: 0;
-    background: radial-gradient(140px circle at var(--x) var(--y), rgba(var(--accent), .55), transparent 70%);
+    background: radial-gradient(140px circle at var(--x) var(--y), rgba(var(--accent), .3), transparent 70%);
     opacity: 0; transition: opacity .3s;
   }
   .donate:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px rgba(var(--accent), .6), 0 16px 40px rgba(var(--accent), .25); }
@@ -104,14 +104,17 @@
   main { display: grid; place-items: center; }
   .halo {   /* вращающееся свечение за кнопкой */
     position: absolute; width: 420px; height: 420px; border-radius: 50%;
-    background: conic-gradient(from 0deg, transparent, rgba(var(--accent), .35), transparent 40%, rgba(80,160,255,.25), transparent 80%);
+    background: conic-gradient(from 0deg, transparent, rgba(var(--accent), .16), transparent 40%, rgba(255,160,90,.1), transparent 80%);
     filter: blur(50px);
     animation: spin 10s linear infinite;
     pointer-events: none;
   }
 
   @keyframes rise { from { opacity: 0; transform: translateY(24px) scale(.92); } }
-  @keyframes breathe { 50% { box-shadow: 0 0 0 1px rgba(var(--accent), .5), 0 14px 50px rgba(var(--accent), .35); } }
+  @keyframes breathe { 50% { box-shadow: 0 0 0 1px rgba(var(--accent), .35), 0 14px 40px rgba(var(--accent), .18); } }
+  .card { padding: 30px 34px; animation: rise .9s cubic-bezier(.2,.8,.2,1) both; }
+  .heart { display: inline-block; margin-right: 12px; color: rgb(var(--accent)); animation: beat 1.6s ease-in-out infinite; }
+  @keyframes beat { 0%, 100% { transform: scale(1); } 15% { transform: scale(1.25); } 30% { transform: scale(1); } }
   @keyframes sweep { 0%, 60% { left: -80%; } 100% { left: 160%; } }
   @keyframes ripple { to { transform: scale(4); opacity: 0; } }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -125,9 +128,11 @@
 
   <main>
     <div class="halo"></div>
-    <a id="btn" class="donate" href="https://www.donationalerts.com/r/mr_larp" target="_blank" rel="noopener">
-      <span>Донат</span>
-    </a>
+    <div class="card">
+      <a id="btn" class="donate" href="https://www.donationalerts.com/r/mr_larp" target="_blank" rel="noopener">
+        <span><span class="heart">❤</span>Донат</span>
+      </a>
+    </div>
   </main>
 
 <script>
@@ -135,7 +140,7 @@
   const btn = document.getElementById('btn');
   let W, H, dpr, pts = [];
   const mouse = { x: -9999, y: -9999 };
-  const A = '45,212,191';
+  const A = '255,107,129';
   // сглаженные координаты: свет и кнопка плавно догоняют курсор
   const tgt = { x: innerWidth / 2, y: innerHeight / 2 }, cur = { x: tgt.x, y: tgt.y };
   const mag = { tx: 0, ty: 0, x: 0, y: 0 };
