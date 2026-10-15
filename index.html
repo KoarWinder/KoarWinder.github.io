@@ -119,6 +119,29 @@
   @keyframes ripple { to { transform: scale(4); opacity: 0; } }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+
+  /* скрытая консоль статистики: ` (Ё) на клавиатуре или 5 быстрых тапов в левом верхнем углу */
+  .term {
+    position: fixed; left: 50%; bottom: 18px; z-index: 20;
+    width: min(94vw, 720px); height: 300px;
+    translate: -50% 130%; opacity: 0; pointer-events: none;
+    display: flex; flex-direction: column;
+    background: rgba(12, 12, 20, .72);
+    -webkit-backdrop-filter: blur(22px) saturate(1.3); backdrop-filter: blur(22px) saturate(1.3);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 18px;
+    box-shadow: 0 24px 70px rgba(0,0,0,.55);
+    font: 13px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #e8e8f0;
+    transition: translate .45s cubic-bezier(.2,.8,.2,1), opacity .3s;
+  }
+  .term.open { translate: -50% 0; opacity: 1; pointer-events: auto; }
+  .term-out { flex: 1; overflow-y: auto; padding: 14px 16px 6px; white-space: pre-wrap; word-break: break-word; }
+  .term-out .dim { color: rgba(232,232,240,.5); }
+  .term-out .ok { color: #6ee7a0; }
+  .term-out .err { color: #ff7a8c; }
+  .term-out .hl { color: rgb(var(--accent)); }
+  .term-in { display: flex; gap: 8px; padding: 10px 16px 14px; border-top: 1px solid rgba(255,255,255,.08); }
+  .term-in span { color: rgb(var(--accent)); }
+  .term-in input { flex: 1; background: none; border: 0; outline: 0; color: inherit; font: inherit; }
 </style>
 </head>
 <body>
@@ -135,6 +158,11 @@
       </a>
     </div>
   </main>
+
+  <div class="term" id="term" aria-hidden="true">
+    <div class="term-out" id="termOut"></div>
+    <label class="term-in"><span>&gt;</span><input id="termIn" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Консоль"></label>
+  </div>
 
 <script>
   const cv = document.getElementById('bg'), ctx = cv.getContext('2d');
@@ -238,6 +266,181 @@
     }
     requestAnimationFrame(loop);
   })();
+</script>
+
+<script>
+/* ===== статистика и скрытая консоль =====
+   Счётчики общие для всех посетителей: хранятся на публичном сервисе abacus.jasoncameron.dev
+   (в нём только числа, без профилей). Код разблокировки хранится как хэш SHA-256 —
+   это защита «от любопытных», а не настоящая безопасность: сайт статический, исходник открыт. */
+(() => {
+  const NS = 'koarwinder-github-io', API = 'https://abacus.jasoncameron.dev';
+  const OFFSET = [8, 8, 0];   // тестовые заходы при разработке (visits, unique, clicks) — вычитаются из статистики
+  const SALT = 'larp:', HASH = '692205fd778f536ace90e1562b8c6d1929ccbb96409f48165a9f3b76a3f4defd';
+  const LS = {
+    get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} },
+    del: k => { try { localStorage.removeItem(k); } catch (e) {} }
+  };
+  const SS = {
+    get: k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } },
+    set: (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} }
+  };
+  const dnt = navigator.doNotTrack === '1' || navigator.globalPrivacyControl === true;   // уважаем «Не отслеживать»
+  const isOwner = () => LS.get('lg_owner') === '1';
+  let memUnlocked = false;   // на случай, когда браузер не даёт писать в localStorage
+  const unlocked = () => memUnlocked || LS.get('lg_unlocked') === '1';
+
+  // локальный журнал событий на этом устройстве
+  let log = []; try { log = JSON.parse(LS.get('lg_log') || '[]'); } catch (e) {}
+  const addLog = t => { log.push({ t, at: Date.now() }); log = log.slice(-60); LS.set('lg_log', JSON.stringify(log)); };
+
+  const api = async (op, key) => {
+    try {
+      const r = await fetch(`${API}/${op}/${NS}/${key}`);
+      if (r.status === 404) return 0;
+      return (await r.json()).value;
+    } catch (e) { return null; }
+  };
+
+  // ---- подсчёт ----
+  const counting = !dnt && !isOwner() && !/[?&]nocount/.test(location.search);   // ?nocount — открыть сайт без подсчёта
+  if (counting) {
+    if (!SS.get('lg_session')) { SS.set('lg_session', '1'); api('hit', 'visits'); addLog('visit'); }
+    if (!LS.get('lg_seen')) { LS.set('lg_seen', String(Date.now())); api('hit', 'unique'); }
+  }
+  document.getElementById('btn').addEventListener('click', () => {
+    if (!counting) return;
+    api('hit', 'clicks'); addLog('click');
+  });
+
+  // ---- консоль ----
+  const term = document.getElementById('term'), out = document.getElementById('termOut'), inp = document.getElementById('termIn');
+  const print = (text, cls) => {
+    const d = document.createElement('div'); if (cls) d.className = cls; d.textContent = text; out.appendChild(d); out.scrollTop = out.scrollHeight;
+  };
+  // SHA-256: нативный, а если страница открыта не по https (нет crypto.subtle) — запасная реализация
+  function sha256js(str) {
+    const rr = (v, n) => (v >>> n) | (v << (32 - n)), K = [], H = [];
+    let p = 2, c = 0;
+    const frac = x => (x - Math.floor(x)) * 4294967296 | 0;
+    for (; c < 64; p++) { let ok = true; for (let i = 2; i * i <= p; i++) if (p % i === 0) { ok = false; break; } if (ok) { if (c < 8) H[c] = frac(Math.pow(p, .5)); K[c++] = frac(Math.pow(p, 1 / 3)); } }
+    const bytes = [...new TextEncoder().encode(str)], len = bytes.length * 8;
+    bytes.push(0x80); while (bytes.length % 64 !== 56) bytes.push(0);
+    for (let i = 7; i >= 0; i--) bytes.push(i > 3 ? 0 : (len >>> (i * 8)) & 255);
+    for (let o = 0; o < bytes.length; o += 64) {
+      const w = [];
+      for (let i = 0; i < 16; i++) w[i] = (bytes[o + 4 * i] << 24) | (bytes[o + 4 * i + 1] << 16) | (bytes[o + 4 * i + 2] << 8) | bytes[o + 4 * i + 3];
+      for (let i = 16; i < 64; i++) {
+        const s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3), s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+      let [a, b, cc, d, e, f, g, h] = H;
+      for (let i = 0; i < 64; i++) {
+        const t1 = (h + (rr(e, 6) ^ rr(e, 11) ^ rr(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;
+        const t2 = ((rr(a, 2) ^ rr(a, 13) ^ rr(a, 22)) + ((a & b) ^ (a & cc) ^ (b & cc))) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = cc; cc = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + cc) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    return H.map(v => (v >>> 0).toString(16).padStart(8, '0')).join('');
+  }
+  const sha = async s => {
+    try {
+      if (window.crypto && crypto.subtle) return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {}
+    return sha256js(s);
+  };
+  const fmtDate = ms => new Date(ms).toLocaleString('ru-RU');
+  const fmt = v => v === null ? 'нет связи' : String(v);
+
+  async function unlock(code) {
+    if (!code) return 'Использование: unlock <код>';
+    if (await sha(SALT + code) !== HASH) return null;
+    memUnlocked = true; LS.set('lg_unlocked', '1'); LS.set('lg_owner', '1');
+    return 'Статистика разблокирована. Твои визиты и клики на этом устройстве больше не считаются.';
+  }
+  async function stats() {
+    if (!unlocked()) return 'Статистика закрыта. Введи: unlock <код>';
+    const raw = await Promise.all([api('get', 'visits'), api('get', 'unique'), api('get', 'clicks')]);
+    const [visits, unique, clicks] = raw.map((v, i) => v === null ? null : Math.max(0, v - OFFSET[i]));
+    const rate = visits ? ((clicks / visits) * 100).toFixed(1) + '%' : '—';
+    const lines = [
+      'ВСЕ ПОСЕТИТЕЛИ',
+      `  визитов (сессий):    ${fmt(visits)}`,
+      `  уникальных устройств: ${fmt(unique)}`,
+      `  нажатий на «Донат»:   ${fmt(clicks)}`,
+      `  конверсия:            ${rate}`,
+      '',
+      'ЭТО УСТРОЙСТВО',
+      `  первый заход: ${LS.get('lg_seen') ? fmtDate(+LS.get('lg_seen')) : '—'}`,
+      `  последние события:`
+    ];
+    log.slice(-8).reverse().forEach(e => lines.push(`    ${fmtDate(e.at)}  ${e.t === 'click' ? 'клик по кнопке' : 'визит'}`));
+    if (!log.length) lines.push('    пока пусто');
+    return lines.join('\n');
+  }
+  window.larp = {
+    unlock: async code => { const r = await unlock(code); console.log(r || 'Неверный код'); return !!r; },
+    stats: async () => { console.log(await stats()); },
+    lock: () => { memUnlocked = false; LS.del('lg_unlocked'); console.log('Закрыто'); }
+  };
+
+  const help = [
+    'help            — список команд',
+    'unlock <код>    — открыть статистику',
+    'stats           — показать статистику',
+    'lock            — закрыть статистику',
+    'hash <текст>    — SHA-256 для нового кода (см. HASH в исходнике)',
+    'clear           — очистить экран',
+    'exit            — закрыть консоль'
+  ].join('\n');
+
+  const run = async line => {
+    const [cmd, ...rest] = line.trim().split(/\s+/); const arg = rest.join(' ');
+    switch ((cmd || '').toLowerCase()) {
+      case '': return;
+      case 'help': case '?': print(help); break;
+      case 'unlock': {
+        const r = await unlock(arg); r ? print(r, 'ok') : print('Неверный код', 'err'); break;
+      }
+      case 'stats': print('загружаю…', 'dim'); out.lastChild.remove(); print(await stats(), unlocked() ? 'hl' : 'err'); break;
+      case 'lock': memUnlocked = false; LS.del('lg_unlocked'); print('Статистика закрыта', 'ok'); break;
+      case 'hash': print(arg ? await sha(SALT + arg) : 'Использование: hash <текст>'); break;
+      case 'clear': out.textContent = ''; break;
+      case 'exit': case 'close': toggle(false); break;
+      default: print(`Неизвестная команда: ${cmd}. Введи help`, 'err');
+    }
+  };
+
+  function toggle(open) {
+    open = open === undefined ? !term.classList.contains('open') : open;
+    term.classList.toggle('open', open); term.setAttribute('aria-hidden', String(!open));
+    if (open) { if (!out.childElementCount) { print('LARP CONSOLE', 'hl'); print('help — список команд', 'dim'); } setTimeout(() => inp.focus(), 350); }
+    else inp.blur();
+  }
+
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const v = inp.value; inp.value = '';
+      if (v.trim()) print('> ' + (/^unlock\s/i.test(v) ? 'unlock ••••' : v), 'dim');
+      run(v).catch(err => print('Ошибка: ' + err.message, 'err'));
+    }
+    if (e.key === 'Escape') toggle(false);
+    e.stopPropagation();
+  });
+  addEventListener('keydown', e => {
+    if (e.code === 'Backquote' && document.activeElement !== inp) { e.preventDefault(); toggle(); }
+  });
+  // для телефона: 5 быстрых тапов в левом верхнем углу
+  let taps = [];
+  addEventListener('pointerdown', e => {
+    if (e.clientX > 80 || e.clientY > 80) return;
+    const now = Date.now(); taps = taps.filter(t => now - t < 1800); taps.push(now);
+    if (taps.length >= 5) { taps = []; toggle(); }
+  });
+})();
 </script>
 </body>
 </html>
