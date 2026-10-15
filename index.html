@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -119,29 +119,6 @@
   @keyframes ripple { to { transform: scale(4); opacity: 0; } }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
-
-  /* скрытая консоль статистики: ` (Ё) на клавиатуре или 5 быстрых тапов в левом верхнем углу */
-  .term {
-    position: fixed; left: 50%; bottom: 18px; z-index: 20;
-    width: min(94vw, 720px); height: 300px;
-    translate: -50% 130%; opacity: 0; pointer-events: none;
-    display: flex; flex-direction: column;
-    background: rgba(12, 12, 20, .72);
-    -webkit-backdrop-filter: blur(22px) saturate(1.3); backdrop-filter: blur(22px) saturate(1.3);
-    border: 1px solid rgba(255,255,255,.12); border-radius: 18px;
-    box-shadow: 0 24px 70px rgba(0,0,0,.55);
-    font: 13px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #e8e8f0;
-    transition: translate .45s cubic-bezier(.2,.8,.2,1), opacity .3s;
-  }
-  .term.open { translate: -50% 0; opacity: 1; pointer-events: auto; }
-  .term-out { flex: 1; overflow-y: auto; padding: 14px 16px 6px; white-space: pre-wrap; word-break: break-word; }
-  .term-out .dim { color: rgba(232,232,240,.5); }
-  .term-out .ok { color: #6ee7a0; }
-  .term-out .err { color: #ff7a8c; }
-  .term-out .hl { color: rgb(var(--accent)); }
-  .term-in { display: flex; gap: 8px; padding: 10px 16px 14px; border-top: 1px solid rgba(255,255,255,.08); }
-  .term-in span { color: rgb(var(--accent)); }
-  .term-in input { flex: 1; background: none; border: 0; outline: 0; color: inherit; font: inherit; }
 </style>
 </head>
 <body>
@@ -158,11 +135,6 @@
       </a>
     </div>
   </main>
-
-  <div class="term" id="term" aria-hidden="true">
-    <div class="term-out" id="termOut"></div>
-    <label class="term-in"><span>&gt;</span><input id="termIn" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Консоль"></label>
-  </div>
 
 <script>
   const cv = document.getElementById('bg'), ctx = cv.getContext('2d');
@@ -314,11 +286,6 @@
     api('hit', 'clicks'); addLog('click');
   });
 
-  // ---- консоль ----
-  const term = document.getElementById('term'), out = document.getElementById('termOut'), inp = document.getElementById('termIn');
-  const print = (text, cls) => {
-    const d = document.createElement('div'); if (cls) d.className = cls; d.textContent = text; out.appendChild(d); out.scrollTop = out.scrollHeight;
-  };
   // SHA-256: нативный, а если страница открыта не по https (нет crypto.subtle) — запасная реализация
   function sha256js(str) {
     const rr = (v, n) => (v >>> n) | (v << (32 - n)), K = [], H = [];
@@ -356,13 +323,13 @@
   const fmt = v => v === null ? 'нет связи' : String(v);
 
   async function unlock(code) {
-    if (!code) return 'Использование: unlock <код>';
+    if (!code) return 'Использование: larp.unlock("код")';
     if (await sha(SALT + code) !== HASH) return null;
     memUnlocked = true; LS.set('lg_unlocked', '1'); LS.set('lg_owner', '1');
     return 'Статистика разблокирована. Твои визиты и клики на этом устройстве больше не считаются.';
   }
   async function stats() {
-    if (!unlocked()) return 'Статистика закрыта. Введи: unlock <код>';
+    if (!unlocked()) return 'Статистика закрыта. Введи: larp.unlock("код")';
     const raw = await Promise.all([api('get', 'visits'), api('get', 'unique'), api('get', 'clicks')]);
     const [visits, unique, clicks] = raw.map((v, i) => v === null ? null : Math.max(0, v - OFFSET[i]));
     const rate = visits ? ((clicks / visits) * 100).toFixed(1) + '%' : '—';
@@ -381,65 +348,15 @@
     if (!log.length) lines.push('    пока пусто');
     return lines.join('\n');
   }
+  // Управление только из консоли браузера (F12 → Console): larp.help()
+  const say = (text, style) => console.log('%c' + text, style || 'font-family:monospace');
   window.larp = {
-    unlock: async code => { const r = await unlock(code); console.log(r || 'Неверный код'); return !!r; },
-    stats: async () => { console.log(await stats()); },
-    lock: () => { memUnlocked = false; LS.del('lg_unlocked'); console.log('Закрыто'); }
+    help: () => say('larp.unlock("код")\nlarp.stats()\nlarp.lock()'),
+    unlock: async code => { const r = await unlock(code); say(r || 'Неверный код', r ? 'color:#2ea043' : 'color:#f85149'); },
+    stats: async () => say(await stats()),
+    lock: () => { memUnlocked = false; LS.del('lg_unlocked'); say('Закрыто'); },
+    hash: text => sha(SALT + text)
   };
-
-  const help = [
-    'help            — список команд',
-    'unlock <код>    — открыть статистику',
-    'stats           — показать статистику',
-    'lock            — закрыть статистику',
-    'hash <текст>    — SHA-256 для нового кода (см. HASH в исходнике)',
-    'clear           — очистить экран',
-    'exit            — закрыть консоль'
-  ].join('\n');
-
-  const run = async line => {
-    const [cmd, ...rest] = line.trim().split(/\s+/); const arg = rest.join(' ');
-    switch ((cmd || '').toLowerCase()) {
-      case '': return;
-      case 'help': case '?': print(help); break;
-      case 'unlock': {
-        const r = await unlock(arg); r ? print(r, 'ok') : print('Неверный код', 'err'); break;
-      }
-      case 'stats': print('загружаю…', 'dim'); out.lastChild.remove(); print(await stats(), unlocked() ? 'hl' : 'err'); break;
-      case 'lock': memUnlocked = false; LS.del('lg_unlocked'); print('Статистика закрыта', 'ok'); break;
-      case 'hash': print(arg ? await sha(SALT + arg) : 'Использование: hash <текст>'); break;
-      case 'clear': out.textContent = ''; break;
-      case 'exit': case 'close': toggle(false); break;
-      default: print(`Неизвестная команда: ${cmd}. Введи help`, 'err');
-    }
-  };
-
-  function toggle(open) {
-    open = open === undefined ? !term.classList.contains('open') : open;
-    term.classList.toggle('open', open); term.setAttribute('aria-hidden', String(!open));
-    if (open) { if (!out.childElementCount) { print('LARP CONSOLE', 'hl'); print('help — список команд', 'dim'); } setTimeout(() => inp.focus(), 350); }
-    else inp.blur();
-  }
-
-  inp.addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      const v = inp.value; inp.value = '';
-      if (v.trim()) print('> ' + (/^unlock\s/i.test(v) ? 'unlock ••••' : v), 'dim');
-      run(v).catch(err => print('Ошибка: ' + err.message, 'err'));
-    }
-    if (e.key === 'Escape') toggle(false);
-    e.stopPropagation();
-  });
-  addEventListener('keydown', e => {
-    if (e.code === 'Backquote' && document.activeElement !== inp) { e.preventDefault(); toggle(); }
-  });
-  // для телефона: 5 быстрых тапов в левом верхнем углу
-  let taps = [];
-  addEventListener('pointerdown', e => {
-    if (e.clientX > 80 || e.clientY > 80) return;
-    const now = Date.now(); taps = taps.filter(t => now - t < 1800); taps.push(now);
-    if (taps.length >= 5) { taps = []; toggle(); }
-  });
 })();
 </script>
 </body>
