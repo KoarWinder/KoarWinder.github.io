@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mr_Larp — Донат</title>
 <style>
-  :root { --accent: 139, 124, 255; }
+  :root { --accent: 45, 212, 191; }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
@@ -27,6 +27,12 @@
     background: radial-gradient(520px circle at var(--mx, 50%) var(--my, 50%),
                 rgba(var(--accent), .10), transparent 60%);
   }
+  .spot::after {   /* второе, тёплое пятно с задержкой — даёт глубину и мягкий шлейф */
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), rgba(255,170,80,.07), transparent 70%);
+  }
+  body { animation: fadein 1.4s ease both; }
+  @keyframes fadein { from { opacity: 0; } }
   .vignette {
     position: fixed; inset: 0; pointer-events: none;
     background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,.65) 100%);
@@ -129,7 +135,10 @@
   const btn = document.getElementById('btn');
   let W, H, dpr, pts = [];
   const mouse = { x: -9999, y: -9999 };
-  const A = '139,124,255';
+  const A = '45,212,191';
+  // сглаженные координаты: свет и кнопка плавно догоняют курсор
+  const tgt = { x: innerWidth / 2, y: innerHeight / 2 }, cur = { x: tgt.x, y: tgt.y };
+  const mag = { tx: 0, ty: 0, x: 0, y: 0 };
 
   function resize() {
     dpr = Math.min(devicePixelRatio || 1, 2);
@@ -147,8 +156,7 @@
 
   addEventListener('mousemove', e => {
     mouse.x = e.clientX; mouse.y = e.clientY;
-    document.documentElement.style.setProperty('--mx', e.clientX + 'px');
-    document.documentElement.style.setProperty('--my', e.clientY + 'px');
+    tgt.x = e.clientX; tgt.y = e.clientY;
   });
   addEventListener('mouseleave', () => { mouse.x = mouse.y = -9999; });
   btn.addEventListener('mousemove', e => {
@@ -161,8 +169,8 @@
     const r = btn.getBoundingClientRect();
     const dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
     const d = Math.hypot(dx, dy);
-    if (d < 220) btn.style.translate = `${dx * .12}px ${dy * .12}px`;
-    else btn.style.translate = '';
+    if (d < 240) { mag.tx = dx * .14; mag.ty = dy * .14; }
+    else { mag.tx = 0; mag.ty = 0; }
   });
   // волна по клику
   btn.addEventListener('click', e => {
@@ -182,6 +190,12 @@
   });
 
   (function loop() {
+    // плавное следование (lerp)
+    cur.x += (tgt.x - cur.x) * .08; cur.y += (tgt.y - cur.y) * .08;
+    mag.x += (mag.tx - mag.x) * .12; mag.y += (mag.ty - mag.y) * .12;
+    const rs = document.documentElement.style;
+    rs.setProperty('--mx', cur.x + 'px'); rs.setProperty('--my', cur.y + 'px');
+    btn.style.translate = `${mag.x}px ${mag.y}px`;
     ctx.clearRect(0, 0, W, H);
     for (const p of pts) {
       // лёгкое отталкивание от курсора
